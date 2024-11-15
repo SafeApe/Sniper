@@ -3,6 +3,17 @@ name = "dipsniper"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "main"
+path = "src/main.rs"
+
+[[bin]]
+name = "bot"
+path = "src/bot/bot.rs"
+
+[lib]
+path = "src/lib.rs"
+
 [dependencies]
 alloy = { version = "0.6.2", features = ["full"] }
 alloy-pubsub = "0.6.2"
@@ -24,11 +35,13 @@ config = "0.14.1"
 serde_json = "1.0.132"
 futures = "0.3.31"
 bson = "2.13.0"
+hkdf = "0.1.0"
+sha2 = "0.9.8"
+rand = "0.8.4"
+hex = "0.4.3"
+secp256k1 = "0.30.0"
+k256 = "0.13.4"
+
 
 [dependencies.mongodb]
 version = "3.1.0"
-
-
-[[bin]]
-name = "dipsniper"
-path = "main.rs"

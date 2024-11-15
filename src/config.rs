@@ -7,6 +7,7 @@ pub struct Network {
     pub name: String,
     pub rpc: String,
     pub chain_id: u64,
+    pub eip1599: bool,
     pub sniperca: String,
 }
 
@@ -17,6 +18,8 @@ pub struct SConfig {
     pub ipc_service_name: String,
     database: String,
     db_uri: String,
+    redis_uri: String,
+    pub testpk: Option<String>,
 }
 
 impl SConfig {
@@ -28,6 +31,9 @@ impl SConfig {
     }
     pub fn getDataURI(&self) -> String {
         self.db_uri.clone()
+    }
+    pub fn getRedisURI(&self) -> String {
+        self.redis_uri.clone()
     }
     pub fn getNetwork(&self, network: &str) -> &Network {
         self.networks.get(network).unwrap().clone()
@@ -44,7 +50,7 @@ impl SConfig {
 
 pub fn getConfig() -> SConfig {
     Config::builder()
-        .add_source(config::File::with_name("config"))
+        .add_source(config::File::with_name("../config"))
         .build()
         .unwrap()
         .try_deserialize::<SConfig>()

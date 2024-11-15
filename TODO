@@ -1,0 +1,2 @@
+1. Create a Redis Database to store temp data like for profit and loss calculation and laderring sells and buys
+2. Create a Gas Manager for each chain

@@ -1,0 +1,27 @@
+```
+#[derive(Serialize, Deserialize, Debug)]
+pub struct TradeSettings {
+    // These are the settings for default trades
+    userid: u64,
+    multiwallet: bool,
+    stoploss: f32,
+    takeprofit: f32,
+    trailing: bool,        //If this is true, the following trailing settings are used
+    trailingstoploss: f32, //If 0 turned off else the percentage to trail
+    trailingstoplosspercentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
+    trailingtakeprofit: f32,         //If 0 turned off else the percentage to trail
+    trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+}```
+
+Variable Explanation:
+
+Trailing Strategy:
+1. Stop Loss Trailing:
+    - On Price Increase:
+        - On every % increase of price defined by `trailingprofitpercentage` variable set by the user we move the stoploss to the `trailingstoplosspercentage` from the current price.
+        -
+    - On Price Decrease:
+        -
+
+2. Trailing Profit
+    - On every % increase of price defined by `trailingtakeprofit`

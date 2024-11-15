@@ -6,12 +6,16 @@ use utils::create_wallet_pk;
 #[path = "./client/client.rs"]
 mod client;
 
+#[path = "./bot/bot.rs"]
 mod bot;
-mod config;
-mod db;
-mod events;
-mod models;
-mod utils;
+
+// mod events;
+// mod models;
+use dipsniper::config;
+use dipsniper::db;
+use dipsniper::events;
+use dipsniper::models;
+use dipsniper::utils;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

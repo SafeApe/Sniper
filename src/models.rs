@@ -1,4 +1,4 @@
-use crate::utils::create_wallet_pk;
+use crate::utils::{create_wallet, create_wallet_pk};
 use bson::{doc, Document};
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
@@ -21,8 +21,8 @@ pub struct Trades {
     pub amount: String, // U256 is not directly supported, convert to string
     pub active: bool,
     pub priceBought: f64,
-    pub stoploss: u128,   //If this is 0, stoploss is turned off
-    pub takeprofit: u128, //If this is 0, takeprofit is turned off
+    pub stoploss: u64,   //If this is 0, stoploss is turned off
+    pub takeprofit: u64, //If this is 0, takeprofit is turned off
     pub trail: Option<tradeset>,
 }
 
@@ -55,7 +55,7 @@ pub struct TradeSettings {
     trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
 }
 
-#[dervie(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CopyTrade {
     //To copy trades from another user can be added as feature later
     userid: u64,
@@ -74,8 +74,8 @@ impl From<Trades> for Document {
             "amount": trade.amount,
             "active": trade.active,
             "priceBought": trade.priceBought,
-            "stoploss": trade.stoploss,
-            "takeprofit": trade.takeprofit,
+            "stoploss": trade.stoploss.to_string(),
+            "takeprofit": trade.takeprofit.to_string(),
             "trail": match trade.trail {
                 Some(trail) => doc! {
                     "trailingstoploss": trail.trailingstoploss as f64,
@@ -93,7 +93,7 @@ impl From<Wallet> for Document {
     fn from(wallet: Wallet) -> Self {
         doc! {
             "_id": wallet._id,
-            "userid": wallet.userid,
+            "userid": wallet.userid.to_string(),
             "address": wallet.address,
             "chainIDs": wallet.chainIDs,
             "privateKey": wallet.privateKey,
@@ -106,10 +106,6 @@ impl From<User> for Document {
         doc! {
             "_id": user._id,
             "userid": user.userid.to_string(),
-            "stoploss": user.stoploss,
-            "multiWallet": user.multiWallet,
-            "wallets": user.wallets.into_iter().map(Document::from).collect::<Vec<Document>>(),
-            "trades": user.trades.into_iter().map(Document::from).collect::<Vec<Document>>(),
         }
     }
 }
@@ -124,10 +120,10 @@ impl From<Document> for Trades {
             amount: doc.get_str("amount").unwrap().to_string(),
             active: doc.get_bool("active").unwrap(),
             priceBought: doc.get_f64("priceBought").unwrap(),
-            stoploss: doc.get_i64("stoploss").unwrap() as u128,
-            takeprofit: doc.get_i64("takeprofit").unwrap() as u128,
+            stoploss: doc.get_i64("stoploss").unwrap() as u64,
+            takeprofit: doc.get_i64("takeprofit").unwrap() as u64,
             trail: match doc.get_document("trail") {
-                Some(trail) => Some(tradeset {
+                Ok(trail) => Some(tradeset {
                     trailingstoploss: trail.get_f64("trailingstoploss").unwrap() as f32,
                     trailingstoplosspercentage: trail.get_f64("trailingstoplosspercentage").unwrap()
                         as f32,
@@ -135,7 +131,7 @@ impl From<Document> for Trades {
                     trailingprofitpercentage: trail.get_f64("trailingprofitpercentage").unwrap()
                         as f32,
                 }),
-                None => None,
+                Err(_) => None,
             },
         }
     }
@@ -168,26 +164,26 @@ impl From<Document> for User {
 }
 
 impl User {
-    fn default(userid: u64) -> User {
+    pub fn default(userid: u64) -> User {
         User { _id: None, userid }
     }
-    fn new(userid: u64) -> User {
+    pub fn new(userid: u64) -> User {
         User { _id: None, userid }
     }
 }
 
 impl Wallet {
-    fn new(userid: u64) -> Wallet {
-        let (privateKey, address) = create_wallet_pk();
+    pub fn new(userid: u64) -> Wallet {
+        let (privateKey, address) = create_wallet();
         Wallet {
             _id: None,
             userid,
-            address: address,
+            address: address.to_string(),
             chainIDs: vec![],
             privateKey,
         }
     }
-    fn default(userid: u64, address: String, chainIDs: Vec<i64>, privateKey: String) -> Wallet {
+    pub fn default(userid: u64, address: String, chainIDs: Vec<i64>, privateKey: String) -> Wallet {
         Wallet {
             _id: None,
             userid,
@@ -199,7 +195,7 @@ impl Wallet {
 }
 
 impl Trades {
-    fn new(
+    pub fn new(
         userid: u64,
         address: String,
         isEVM: bool,
@@ -207,8 +203,8 @@ impl Trades {
         amount: String,
         active: bool,
         priceBought: f64,
-        stoploss: f32,
-        takeprofit: f32,
+        stoploss: u64,
+        takeprofit: u64,
         trail: Option<tradeset>,
     ) -> Trades {
         Trades {
