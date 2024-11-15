@@ -50,7 +50,7 @@ impl SConfig {
 
 pub fn getConfig() -> SConfig {
     Config::builder()
-        .add_source(config::File::with_name("../config"))
+        .add_source(config::File::with_name("config"))
         .build()
         .unwrap()
         .try_deserialize::<SConfig>()

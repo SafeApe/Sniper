@@ -1,6 +1,6 @@
 use alloy::primitives::Address;
 use std::os::unix::net::UnixListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use tokio::net::UnixListener as TokioUnixListener;
 
 const SOCKET_PATH: &str = "/tmp/sniperSocket";

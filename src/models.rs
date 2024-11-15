@@ -1,4 +1,4 @@
-use crate::utils::{create_wallet, create_wallet_pk};
+use crate::utils::create_wallet;
 use bson::{doc, Document};
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
@@ -33,6 +33,7 @@ pub struct Wallet {
     pub chainIDs: Vec<i64>, // If empty, enabled for all chains
     pub privateKey: String,
     pub userid: u64,
+    pub name: String, // Adding name field for wallet identification
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -44,15 +45,16 @@ pub struct User {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct TradeSettings {
     // These are the settings for default trades
-    userid: u64,
-    multiwallet: bool,
-    stoploss: f32,
-    takeprofit: f32,
-    trailing: bool,        //If this is true, the following trailing settings are used
-    trailingstoploss: f32, //If 0 turned off else the percentage to trail
-    trailingstoplosspercentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
-    trailingtakeprofit: f32,         //If 0 turned off else the percentage to trail
-    trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+    pub userid: u64,
+    pub multiwallet: bool,
+    pub stoploss: f32,
+    pub takeprofit: f32,
+    pub trailing: bool,        //If this is true, the following trailing settings are used
+    pub trailingstoploss: f32, //If 0 turned off else the percentage to trail
+    pub trailingstoplosspercentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
+    pub trailingtakeprofit: f32,         //If 0 turned off else the percentage to trail
+    pub trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+    pub mev_enabled_chains: Vec<i64>, // Chain IDs where MEV is enabled. Empty vector means MEV is disabled on all chains
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -97,6 +99,7 @@ impl From<Wallet> for Document {
             "address": wallet.address,
             "chainIDs": wallet.chainIDs,
             "privateKey": wallet.privateKey,
+            "name": wallet.name,
         }
     }
 }
@@ -109,6 +112,7 @@ impl From<User> for Document {
         }
     }
 }
+
 impl From<Document> for Trades {
     fn from(doc: Document) -> Self {
         Trades {
@@ -150,6 +154,7 @@ impl From<Document> for Wallet {
                 .map(|x| x.as_i64().unwrap())
                 .collect(),
             privateKey: doc.get_str("privateKey").unwrap().to_string(),
+            name: doc.get_str("name").unwrap().to_string(),
         }
     }
 }
@@ -159,6 +164,45 @@ impl From<Document> for User {
         User {
             _id: Some(doc.get_object_id("_id").unwrap()),
             userid: doc.get_i64("userid").unwrap() as u64,
+        }
+    }
+}
+
+impl From<TradeSettings> for Document {
+    fn from(settings: TradeSettings) -> Self {
+        doc! {
+            "userid": settings.userid.to_string(),
+            "multiwallet": settings.multiwallet,
+            "stoploss": settings.stoploss as f64,
+            "takeprofit": settings.takeprofit as f64,
+            "trailing": settings.trailing,
+            "trailingstoploss": settings.trailingstoploss as f64,
+            "trailingstoplosspercentage": settings.trailingstoplosspercentage as f64,
+            "trailingtakeprofit": settings.trailingtakeprofit as f64,
+            "trailingprofitpercentage": settings.trailingprofitpercentage as f64,
+            "mev_enabled_chains": settings.mev_enabled_chains,
+        }
+    }
+}
+
+impl From<Document> for TradeSettings {
+    fn from(doc: Document) -> Self {
+        TradeSettings {
+            userid: doc.get_i64("userid").unwrap() as u64,
+            multiwallet: doc.get_bool("multiwallet").unwrap(),
+            stoploss: doc.get_f64("stoploss").unwrap() as f32,
+            takeprofit: doc.get_f64("takeprofit").unwrap() as f32,
+            trailing: doc.get_bool("trailing").unwrap(),
+            trailingstoploss: doc.get_f64("trailingstoploss").unwrap() as f32,
+            trailingstoplosspercentage: doc.get_f64("trailingstoplosspercentage").unwrap() as f32,
+            trailingtakeprofit: doc.get_f64("trailingtakeprofit").unwrap() as f32,
+            trailingprofitpercentage: doc.get_f64("trailingprofitpercentage").unwrap() as f32,
+            mev_enabled_chains: doc
+                .get_array("mev_enabled_chains")
+                .unwrap()
+                .into_iter()
+                .map(|x| x.as_i64().unwrap())
+                .collect(),
         }
     }
 }
@@ -181,15 +225,17 @@ impl Wallet {
             address: address.to_string(),
             chainIDs: vec![],
             privateKey,
+            name: format!("Wallet {}", &address.to_string()[0..8]), // Default name using first 8 chars of address
         }
     }
     pub fn default(userid: u64, address: String, chainIDs: Vec<i64>, privateKey: String) -> Wallet {
         Wallet {
             _id: None,
             userid,
-            address,
+            address: address.clone(),
             chainIDs,
             privateKey,
+            name: format!("Wallet {}", &address[0..8]), // Default name using first 8 chars of address
         }
     }
 }
@@ -219,6 +265,23 @@ impl Trades {
             stoploss,
             takeprofit,
             trail,
+        }
+    }
+}
+
+impl TradeSettings {
+    pub fn new(userid: u64) -> TradeSettings {
+        TradeSettings {
+            userid,
+            multiwallet: false,
+            stoploss: 0.0,
+            takeprofit: 0.0,
+            trailing: false,
+            trailingstoploss: 0.0,
+            trailingstoplosspercentage: 0.0,
+            trailingtakeprofit: 0.0,
+            trailingprofitpercentage: 0.0,
+            mev_enabled_chains: Vec::new(), // Default to MEV disabled on all chains
         }
     }
 }
