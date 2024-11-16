@@ -9,6 +9,7 @@ pub struct Network {
     pub chain_id: u64,
     pub eip1599: bool,
     pub sniperca: String,
+    pub explorer: String,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
