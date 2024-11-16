@@ -57,7 +57,7 @@ pub struct TradeSettings {
     pub mev_enabled_chains: Vec<i64>, // Chain IDs where MEV is enabled. Empty vector means MEV is disabled on all chains
 }
 
-#[derive(Serialize, Deserialize, Debug,Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CopyTrade {
     //To copy trades from another user can be added as feature later
     userid: i64,
@@ -70,8 +70,7 @@ pub struct CopyTrade {
 pub struct Token {
     pub _id: Option<ObjectId>,
     pub name: String,
-    pub supply: String,  // Using String for large numbers
-    pub owner: String,   // Address as string
+    pub owner: Option<String>,   // Address as string
     pub decimals: u8,
     pub chain: i64,      // Chain ID
     pub pairs: Vec<String>, // Vector of pair addresses
@@ -85,6 +84,7 @@ pub struct Pair {
     pub token2: String,  // Address of second token
     pub pool_version: String, // Version of the pool (e.g., "v2", "v3")
     pub dex: String,     // Name of the DEX (e.g., "Uniswap", "PancakeSwap")
+    pub liq_token: Option<String>, // Address of the liquidity token
     pub created_at: Option<i64>, // Unix timestamp
 }
 
@@ -240,7 +240,6 @@ impl From<Token> for Document {
         doc! {
             "_id": token._id,
             "name": token.name,
-            "supply": token.supply,
             "owner": token.owner,
             "decimals": token.decimals as i32,
             "chain": token.chain,
@@ -255,8 +254,7 @@ impl From<Document> for Token {
         Token {
             _id: doc.get_object_id("_id").ok(),
             name: doc.get_str("name").unwrap().to_string(),
-            supply: doc.get_str("supply").unwrap().to_string(),
-            owner: doc.get_str("owner").unwrap().to_string(),
+            owner: Some(doc.get_str("owner").unwrap().to_string()),
             decimals: doc.get_i32("decimals").unwrap() as u8,
             chain: doc.get_i64("chain").unwrap(),
             pairs: doc.get_array("pairs").unwrap()
@@ -289,6 +287,7 @@ impl From<Document> for Pair {
             token2: doc.get_str("token2").unwrap().to_string(),
             pool_version: doc.get_str("pool_version").unwrap().to_string(),
             dex: doc.get_str("dex").unwrap().to_string(),
+            liq_token: match doc.get_str("liq_token") { Ok(x) => Some(x.to_string()), Err(_) => None },
             created_at: doc.get_i64("created_at").ok(),
         }
     }
