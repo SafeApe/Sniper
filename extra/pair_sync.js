@@ -64,153 +64,107 @@ async function syncPairs() {
         let relationsBatch = [];
         let tokensBatch = [];
         let processedCount = 0;
+
+        // First, collect all pairs and tokens to check
+        const pairsToCheck = [];
+        const tokensToCheck = new Set();
         
-        // Process pairs and tokens sequentially
         for (const [index, pool] of cacheData.pools.entries()) {
             const poolData = pool.UniswapV2;
             const pairAddress = ethers.getAddress(poolData.address);
-            // print both tokens
-            // console.log(`Processing pair ${index + 1} of ${cacheData.pools.length}: ${pairAddress}`);
-            // write the progress in one line by refreshing the log
-            process.stdout.write(`Processing pair ${index + 1} of ${cacheData.pools.length}: ${pairAddress}\r`);
-            // Check if pair already exists
-            const existingPair = await pairsCollection.findOne({ address: pairAddress });
-            if (existingPair) {
-                console.log(`Pair ${pairAddress} already exists, skipping...`);
-                continue;
-            }
+            const token0Address = ethers.getAddress(poolData.token0);
+            const token1Address = ethers.getAddress(poolData.token1);
+            
+            pairsToCheck.push({
+                address: pairAddress,
+                token0: token0Address,
+                token1: token1Address
+            });
+            
+            tokensToCheck.add(token0Address);
+            tokensToCheck.add(token1Address);
+        }
 
-            let token0Address = ethers.getAddress(poolData.token0);
-            let token1Address = ethers.getAddress(poolData.token1);
-            // if token0 or token1 address is more then 42, use pool address to fetch it
-            if (token0Address.length > 42 || token1Address.length > 42) {
-                const pairContract = new ethers.Contract(pairAddress, PAIR_ABI, provider);
-                [token0Address, token1Address] = await Promise.all([
-                    pairContract.token0().catch(() => null),
-                    pairContract.token1().catch(() => null)
-                ]);
-            }
+        // Bulk check existing pairs
+        const existingPairs = await pairsCollection.find({
+            $or: pairsToCheck.map(pair => ({
+                $or: [
+                    { token1: pair.token0, token2: pair.token1 },
+                    { token1: pair.token1, token2: pair.token0 }
+                ]
+            }))
+        }).toArray();
 
-            // For first pool, add both tokens and set liq_token as null
-            if (index === 0) {
-                // Add both tokens if they don't exist
-                for (const tokenAddress of [token0Address, token1Address]) {
-                    const existingToken = await tokensCollection.findOne({ address: tokenAddress });
-                    if (!existingToken) {
+        const existingPairMap = new Map(
+            existingPairs.map(pair => [
+                `${pair.token1}_${pair.token2}`,
+                true
+            ])
+        );
+
+        // Bulk check existing tokens
+        const existingTokens = await tokensCollection.find({
+            address: { $in: Array.from(tokensToCheck) }
+        }).toArray();
+
+        const existingTokenMap = new Map(
+            existingTokens.map(token => [token.address, true])
+        );
+
+        // Now process pairs that don't exist
+        for (const pair of pairsToCheck) {
+            const pairKey1 = `${pair.token0}_${pair.token1}`;
+            const pairKey2 = `${pair.token1}_${pair.token0}`;
+            
+            if (!existingPairMap.has(pairKey1) && !existingPairMap.has(pairKey2)) {
+                // Check and add tokens if they don't exist
+                for (const tokenAddress of [pair.token0, pair.token1]) {
+                    if (!existingTokenMap.has(tokenAddress)) {
                         const tokenInfo = await getTokenInfo(provider, tokenAddress);
                         if (tokenInfo) {
+                            tokenInfo.chain = 1;
                             tokensBatch.push(tokenInfo);
+                            existingTokenMap.set(tokenAddress, true);
                         }
-                        tokenInfo.chain = 1;
                     }
                 }
 
-                // Add pair with no liq_token
-                const pair = {
-                    address: pairAddress,
-                    token1: token0Address,
-                    token2: token1Address,
-                    pool_version: '2',
+                // Add new pair
+                const newPair = {
+                    address: pair.address,
+                    token1: pair.token0,
+                    token2: pair.token1,
+                    pool_version: "v2",
                     dex: 'Uniswap-V2',
-                    liq_token: token1Address,
+                    liq_token: pair.token1,
                     created_at: Date.now()
                 };
 
-                pairsBatch.push(pair);
+                pairsBatch.push(newPair);
                 
-                // Create token-pair relationships
+                // Add relations for both tokens
                 relationsBatch.push({
-                    token_address: token0Address,
-                    pair_address: pairAddress,
+                    token_address: pair.token0,
+                    pair_address: pair.address,
                     created_at: Math.floor(Date.now() / 1000)
                 });
                 
                 relationsBatch.push({
-                    token_address: token1Address,
-                    pair_address: pairAddress,
+                    token_address: pair.token1,
+                    pair_address: pair.address,
                     created_at: Math.floor(Date.now() / 1000)
                 });
-            } else {
-                // Check which token exists in db (that's our liq token)
-                const token0Exists = await tokensCollection.findOne({ address: token0Address });
-                const token1Exists = await tokensCollection.findOne({ address: token1Address });
-                
-                let liqToken, newToken;
-                
-                if (token0Exists && !token1Exists) {
-                    liqToken = token0Address;
-                    newToken = token1Address;
-                } else if (!token0Exists && token1Exists) {
-                    liqToken = token1Address;
-                    newToken = token0Address;
-                } else if (token0Exists && token1Exists) {
-                    // Both tokens exist, find which one was added first
-                    const tokens = await tokensCollection.find({
-                        address: { $in: [token0Address, token1Address] }
-                    }).sort({ created_at: 1 }).toArray();
-                    // console.log("Order: ",tokens);
-                    if (tokens.length === 2) {
-                        liqToken = tokens[0].address; // First token is the liq token
-                        newToken = tokens[1].address;
-                        
-                        // Create token-pair relationships
-                        relationsBatch.push({
-                            token_address: liqToken,
-                            pair_address: pairAddress,
-                            created_at: Math.floor(Date.now() / 1000)
-                        });
-                        
-                        relationsBatch.push({
-                            token_address: newToken,
-                            pair_address: pairAddress,
-                            created_at: Math.floor(Date.now() / 1000)
-                        });
-                    } else {
-                        // find each one separately
-                        const token0index = await tokensCollection.findOne({ address: token0Address });
-                        const token1index = await tokensCollection.findOne({ address: token1Address });
-                        if (token0index.created_at < token1index.created_at) {
-                            liqToken = token0Address;
-                            newToken = token1Address;
-                        } else {
-                            liqToken = token1Address;
-                            newToken = token0Address;
-                        }
-                    }
-                } else {
-                    // get token creation time from dexscreen api
-                    
-                    // fetch via blockchain
-                    // console.log(`Token0 : ${token0Address}\nToken1 : ${token1Address}`);
-                    console.log(`Skipping pair ${pairAddress} - no tokens found`);
-                    // process.exit(1);
-                    // continue;
-                }
 
-                // Add the new token
-                const tokenInfo = await getTokenInfo(provider, newToken);
-                if (tokenInfo) {
-                    tokensBatch.push(tokenInfo);
-                }
-
-                // Add the pair with liq_token
-                const pair = {
-                    address: pairAddress,
-                    token1: token0Address,
-                    token2: token1Address,
-                    pool_version: 'v2',
-                    dex: 'UniswapV2',
-                    liq_token: liqToken,
-                    created_at: Date.now()
-                };
-
-                pairsBatch.push(pair);
+                processedCount++;
             }
-            
-            // console.log(`Processed pair ${pairAddress}`);
-            
-            // Insert batches when they reach the size limit
+
+            // Batch inserts
             if (pairsBatch.length >= BATCH_SIZE) {
+                if (tokensBatch.length > 0) {
+                    await tokensCollection.insertMany(tokensBatch);
+                    console.log(`Inserted ${tokensBatch.length} tokens`);
+                    tokensBatch = [];
+                }
                 if (pairsBatch.length > 0) {
                     await pairsCollection.insertMany(pairsBatch);
                     console.log(`Inserted ${pairsBatch.length} pairs`);
@@ -221,17 +175,14 @@ async function syncPairs() {
                     console.log(`Inserted ${relationsBatch.length} relations`);
                     relationsBatch = [];
                 }
-                if (tokensBatch.length > 0) {
-                    await tokensCollection.insertMany(tokensBatch);
-                    console.log(`Inserted ${tokensBatch.length} tokens`);
-                    tokensBatch = [];
-                }
             }
-            
-            processedCount++;
         }
         
-        // Insert any remaining items in the batches
+        // Insert remaining batches
+        if (tokensBatch.length > 0) {
+            await tokensCollection.insertMany(tokensBatch);
+            console.log(`Inserted final ${tokensBatch.length} tokens`);
+        }
         if (pairsBatch.length > 0) {
             await pairsCollection.insertMany(pairsBatch);
             console.log(`Inserted final ${pairsBatch.length} pairs`);
@@ -240,11 +191,7 @@ async function syncPairs() {
             await tokenPairRelationsCollection.insertMany(relationsBatch);
             console.log(`Inserted final ${relationsBatch.length} relations`);
         }
-        if (tokensBatch.length > 0) {
-            await tokensCollection.insertMany(tokensBatch);
-            console.log(`Inserted final ${tokensBatch.length} tokens`);
-        }
-        
+
         // Create indexes
         await pairsCollection.createIndex({ 'token1': 1 });
         await pairsCollection.createIndex({ 'token2': 1 });
