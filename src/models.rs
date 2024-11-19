@@ -73,8 +73,15 @@ pub struct Token {
     pub owner: Option<String>,   // Address as string
     pub decimals: u8,
     pub chain: i64,      // Chain ID
-    pub pairs: Vec<String>, // Vector of pair addresses
     pub created_at: Option<i64>, // Unix timestamp
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TokenPairRelation {
+    pub _id: Option<ObjectId>,
+    pub token_address: String,
+    pub pair_address: String,
+    pub created_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -243,7 +250,6 @@ impl From<Token> for Document {
             "owner": token.owner,
             "decimals": token.decimals as i32,
             "chain": token.chain,
-            "pairs": token.pairs,
             "created_at": token.created_at,
         }
     }
@@ -257,11 +263,29 @@ impl From<Document> for Token {
             owner: Some(doc.get_str("owner").unwrap().to_string()),
             decimals: doc.get_i32("decimals").unwrap() as u8,
             chain: doc.get_i64("chain").unwrap(),
-            pairs: doc.get_array("pairs").unwrap()
-                .iter()
-                .map(|x| x.as_str().unwrap().to_string())
-                .collect(),
             created_at: doc.get_i64("created_at").ok(),
+        }
+    }
+}
+
+impl From<TokenPairRelation> for Document {
+    fn from(relation: TokenPairRelation) -> Self {
+        doc! {
+            "_id": relation._id,
+            "token_address": relation.token_address,
+            "pair_address": relation.pair_address,
+            "created_at": relation.created_at,
+        }
+    }
+}
+
+impl From<Document> for TokenPairRelation {
+    fn from(doc: Document) -> Self {
+        TokenPairRelation {
+            _id: doc.get_object_id("_id").ok(),
+            token_address: doc.get_str("token_address").unwrap().to_string(),
+            pair_address: doc.get_str("pair_address").unwrap().to_string(),
+            created_at: doc.get_i64("created_at").unwrap(),
         }
     }
 }

@@ -12,12 +12,14 @@ use alloy::{
     signers::local::PrivateKeySigner,
 };
 use alloy_pubsub::PubSubFrontend;
+use loom::broadcast::flashbots::{self, Flashbots, FlashbotsClient};
 use crate::models::trailset;
 use eyre::Result;
-use std::{collections::{HashMap, HashSet}, sync::Arc};
+use std::ops::Deref;
+use std::{collections::{HashMap, HashSet}, sync::Arc,fmt};
 use tokio::sync::RwLock;
-use alloy_mev::{BundleSigner, EthMevProviderExt};
-#[derive(Debug, Clone)]
+
+#[derive()]
 pub struct NetProvider {
     pub provider: Arc<
         FillProvider<
@@ -48,10 +50,31 @@ pub struct NetProvider {
         >,
     >,
     EIP1559: bool,
+    flashbots: Option<Arc<Flashbots<Arc<FillProvider<JoinFill<Identity, JoinFill<GasFiller, JoinFill<BlobGasFiller, JoinFill<NonceFiller, ChainIdFiller>>>>, RootProvider<PubSubFrontend>, PubSubFrontend, Ethereum>>, PubSubFrontend>>>
 }
 
 impl NetProvider {
     pub async fn getSniperSwapper() {}
+}
+
+impl fmt::Debug for NetProvider {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NetProvider")
+            .field("provider", &self.provider)
+            .field("sniperSwapper", &self.sniperSwapper)
+            .field("EIP1559", &self.EIP1559)
+            .finish()
+    }
+}
+impl std::clone::Clone for NetProvider {
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            sniperSwapper: self.sniperSwapper.clone(),
+            EIP1559: self.EIP1559,
+            flashbots: self.flashbots.clone()
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -110,7 +133,7 @@ impl TradeMonitor {
 #[derive(Debug)]
 pub struct TradingClient {
     EVMproviders: HashMap<u64, NetProvider>,
-    active_trades: RwLock<TradeMonitor>,
+    active_trades: Arc<RwLock<TradeMonitor>>,
 }
 
 impl TradingClient {
@@ -123,21 +146,34 @@ impl TradingClient {
         let networks = getConfig().networks;
         let mut EVMproviders = HashMap::new();
         for (name, network) in &networks {
-            let ws = WsConnect::new(&network.rpc);
+            let bundle_signer = PrivateKeySigner::random();
+            let ws = WsConnect::new(&network.ws_rpc);
             let provider = ProviderBuilder::new()
                 .with_recommended_fillers() // Adds ChainIdFiller, GasFiller, and NonceFiller
                 .on_ws(ws)
                 .await?;
-
             let provider = Arc::new(provider);
+            let tx_signer = EthereumWallet::new(bundle_signer.clone());
             let sniperSwapper = abi::SniperSwapper::new(
                 crate::utils::convertToAddress(&network.sniperca),
                 provider.clone(),
             );
+            let flashbots_url: &str = network.flashbots_url.as_ref();
+            let flashbots = if flashbots_url.is_empty() {
+                None
+            } else {
+                let mut ff = Flashbots::new(provider.clone(), flashbots_url, None);
+                if (network.chain_id == 1){
+                    ff = ff.with_default_relays();
+                }
+                Some(Arc::new(ff))
+            };
+
             let net_provider = NetProvider {
                 provider,
                 sniperSwapper,
                 EIP1559: network.eip1599,
+                flashbots: flashbots
             };
             EVMproviders.insert(network.chain_id, net_provider);
             println!("Network: {} initialized", name);
@@ -145,13 +181,13 @@ impl TradingClient {
         println!("EVM {:?}", EVMproviders);
         // Initialize signer with private key
         Ok(Self { 
-            EVMproviders,
-            active_trades: RwLock::new(TradeMonitor::new()),
+            EVMproviders:EVMproviders,
+            active_trades: Arc::new(RwLock::new(TradeMonitor::new())),
         })
     }
     pub async fn get_fixed_transaction_request(
         mut tx: TransactionRequest,
-        wallet: EthereumWallet,
+        _wallet: EthereumWallet,
         address: Address,
         chain_id: u64,
         provider: &NetProvider,
@@ -175,6 +211,7 @@ impl TradingClient {
         tx.set_gas_limit(gas_limit);
         Ok(tx)
     }
+
     pub async fn buy(
         &self,
         pair: Address,
@@ -190,12 +227,11 @@ impl TradingClient {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let bundle_signer = PrivateKeySigner::random();
         let tx_signer = EthereumWallet::new(bundle_signer.clone()); //MEV
-        
-        let provider = self.EVMproviders.get(&chain_id).unwrap();
+        let provider = self.EVMproviders.get(&chain_id).unwrap().clone();  // Clone the provider
         let tx = provider
-            .sniperSwapper
-            .swap(pair, tokenIn, amount)
-            .into_transaction_request();
+                .sniperSwapper
+                .swap(pair, tokenIn, amount)
+                .into_transaction_request();
 
         if wallets.is_empty() {
             println!("No wallets provided");
@@ -271,8 +307,11 @@ impl TradingClient {
                 chain_id,
             };
 
-            let mut trades = self.active_trades.write().await;
+            let active_trades = self.active_trades.clone();
+            let mut trades = active_trades.write().await;
             trades.add_trade(new_trade);
+            drop(trades);
+            drop(active_trades);
         }
 
         Ok(())

@@ -1,8 +1,9 @@
-use crate::models::{Trades, User, Wallet, TradeSettings, Token, Pair};
+use crate::models::{Trades, User, Wallet, TradeSettings, Token, Pair, TokenPairRelation};
 use mongodb::{options::ClientOptions, Client, Collection, Database};
 use mongodb::bson::{doc, Document};
 use std::error::Error;
 use futures_util::StreamExt;
+use chrono;
 
 // Define custom error type that implements Send + Sync
 #[derive(Debug)]
@@ -32,6 +33,7 @@ pub struct DB {
     trade_settings_collection: Collection<TradeSettings>,
     tokens_collection: Collection<Token>,
     pairs_collection: Collection<Pair>,
+    token_pair_relations_collection: Collection<TokenPairRelation>,
 }
 
 impl DB {
@@ -48,12 +50,14 @@ impl DB {
         db.create_collection("trade_settings").await?;
         db.create_collection("tokens").await?;
         db.create_collection("pairs").await?;
+        db.create_collection("token_pair_relations").await?;
         let users_collection = db.collection("users");
         let wallets_collection = db.collection("wallets");
         let trades_collection = db.collection("trades");
         let trade_settings_collection = db.collection("trade_settings");
         let tokens_collection = db.collection("tokens");
         let pairs_collection = db.collection("pairs");
+        let token_pair_relations_collection = db.collection("token_pair_relations");
         Ok(DB {
             client,
             db,
@@ -63,6 +67,7 @@ impl DB {
             trade_settings_collection,
             tokens_collection,
             pairs_collection,
+            token_pair_relations_collection,
         })
     }
 
@@ -206,10 +211,31 @@ impl DB {
     }
 
     pub async fn add_pair_to_token(&self, token_address: &str, pair_address: &str) -> Result<(), DBError> {
-        let filter = doc! { "address": token_address };
-        let update = doc! { "$addToSet": { "pairs": pair_address } };
-        self.tokens_collection.update_one(filter, update).await?;
+        let relation = TokenPairRelation {
+            _id: None,
+            token_address: token_address.to_string(),
+            pair_address: pair_address.to_string(),
+            created_at: chrono::Utc::now().timestamp(),
+        };
+        self.token_pair_relations_collection.insert_one(relation).await?;
         Ok(())
+    }
+
+    pub async fn get_pairs_by_token(&self, token_address: &str) -> Result<Vec<Pair>, DBError> {
+        let filter = doc! { "token_address": token_address };
+        let mut relations = self.token_pair_relations_collection.find(filter).await?;
+        
+        let mut pairs = Vec::new();
+        while let Some(relation) = relations.next().await {
+            if let Ok(relation) = relation {
+                if let Ok(Some(pair)) = self.pairs_collection
+                    .find_one(doc! { "_id": relation.pair_address }).await
+                {
+                    pairs.push(pair);
+                }
+            }
+        }
+        Ok(pairs)
     }
 
     // Pair Methods
@@ -229,20 +255,20 @@ impl DB {
         Ok(self.pairs_collection.find_one(filter).await?)
     }
 
-    pub async fn get_pairs_by_token(&self, token_address: &str) -> Result<Vec<Pair>, DBError> {
-        let filter = doc! { 
-            "$or": [
-                { "token1": token_address },
-                { "token2": token_address }
-            ]
-        };
-        let mut cursor = self.pairs_collection.find(filter).await?;
-        let mut pairs = Vec::new();
-        while let Some(pair) = cursor.next().await {
-            pairs.push(pair?);
-        }
-        Ok(pairs)
-    }
+    // pub async fn get_pairs_by_token(&self, token_address: &str) -> Result<Vec<Pair>, DBError> {
+    //     let filter = doc! { 
+    //         "$or": [
+    //             { "token1": token_address },
+    //             { "token2": token_address }
+    //         ]
+    //     };
+    //     let mut cursor = self.pairs_collection.find(filter).await?;
+    //     let mut pairs = Vec::new();
+    //     while let Some(pair) = cursor.next().await {
+    //         pairs.push(pair?);
+    //     }
+    //     Ok(pairs)
+    // }
 
     pub async fn update_pair(&self, token1: &str, token2: &str, dex: &str, update: Document) -> Result<(), DBError> {
         let filter = doc! { 

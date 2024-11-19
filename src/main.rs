@@ -27,24 +27,30 @@ use pool_sync::{PoolSync, PoolType, Chain, PoolInfo};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let pool_sync = PoolSync::builder()
-        .add_pool(PoolType::UniswapV2)
-        .chain(Chain::Ethereum).rate_limit(1000)
-        .build()?;
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        if args.contains(&"--sync".to_string()) {
+            let pool_sync = PoolSync::builder()
+            .add_pool(PoolType::UniswapV2)
+            .chain(Chain::Ethereum).rate_limit(10)
+            .build()?;
 
-    // Synchronize pools
-    let (pools, last_synced_block) = pool_sync.sync_pools().await?;
-    for pool in &pools {
-        println!("Pool Address {:?}, Token 0: {:?}, Token 1: {:?}", pool.address(), pool.token0_name(), pool.token1_name());
+            let (pools, last_synced_block) = pool_sync.sync_pools().await?;
+            println!("Synced {} pools! Till block: {}", pools.len(), last_synced_block);
+            return Ok(());
+        }
     }
 
-    println!("Synced {} pools!", pools.len());
+    // let mut config = getConfig();
+    // for pool in &pools {
+    //     println!("Pool Address {:?}, Token 0: {:?}, Token 1: {:?}", pool.address(), pool.token0_name(), pool.token1_name());
+    // }
 
-    // let pair_handler = PairHandler::new();
-    // let res = pair_handler.search("pepe").await.unwrap();
-    // println!("{:?}",res);
-    return Ok(());
 
+    // // let pair_handler = PairHandler::new();
+    // // let res = pair_handler.search("pepe").await.unwrap();
+    // // println!("{:?}",res);
+    // return Ok(());
 
     let db = Arc::new(DB::new().await?);
     let trading_client = Arc::new(BaseTradingClient::initialize().await?);

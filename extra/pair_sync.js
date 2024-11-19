@@ -36,7 +36,6 @@ async function getTokenInfo(provider, tokenAddress) {
             owner: owner ? ethers.getAddress(owner) : getOwner ? ethers.getAddress(getOwner) : null,
             decimals,
             chain: 1, // Ethereum mainnet
-            pairs: [], // Will be populated later
             created_at: Date.now()
         };
     } catch (error) {
@@ -46,19 +45,25 @@ async function getTokenInfo(provider, tokenAddress) {
 }
 
 async function syncPairs() {
-    const client = new MongoClient(config.db_uri);
+    const client = await MongoClient.connect(config.db_uri);
     const provider = new ethers.JsonRpcProvider(config.networks.mainnet.rpc.replace('ws', 'http').replace('8546', '8545'));
     const chainId = await provider.getNetwork().then(network => network.chainId);
     try {
-        await client.connect();
         console.log('Connected to MongoDB');
         
         const db = client.db(config.database);
         const pairsCollection = db.collection('pairs');
         const tokensCollection = db.collection('tokens');
+        const tokenPairRelationsCollection = db.collection('token_pair_relations');
         
         // Read the cache file
         const cacheData = JSON.parse(fs.readFileSync(path.join(__dirname, '../cache/Ethereum_UniswapV2_cache.json'), 'utf8'));
+        
+        const BATCH_SIZE = 1000;
+        let pairsBatch = [];
+        let relationsBatch = [];
+        let tokensBatch = [];
+        let processedCount = 0;
         
         // Process pairs and tokens sequentially
         for (const [index, pool] of cacheData.pools.entries()) {
@@ -94,8 +99,7 @@ async function syncPairs() {
                     if (!existingToken) {
                         const tokenInfo = await getTokenInfo(provider, tokenAddress);
                         if (tokenInfo) {
-                            await tokensCollection.insertOne(tokenInfo);
-                            // console.log(`Added new token ${tokenAddress}`);
+                            tokensBatch.push(tokenInfo);
                         }
                         tokenInfo.chain = 1;
                     }
@@ -112,13 +116,20 @@ async function syncPairs() {
                     created_at: Date.now()
                 };
 
-                await pairsCollection.insertOne(pair);
+                pairsBatch.push(pair);
                 
-                // Update token pairs arrays
-                await tokensCollection.updateMany(
-                    { address: { $in: [token0Address, token1Address] } },
-                    { $addToSet: { pairs: pairAddress } }
-                );
+                // Create token-pair relationships
+                relationsBatch.push({
+                    token_address: token0Address,
+                    pair_address: pairAddress,
+                    created_at: Math.floor(Date.now() / 1000)
+                });
+                
+                relationsBatch.push({
+                    token_address: token1Address,
+                    pair_address: pairAddress,
+                    created_at: Math.floor(Date.now() / 1000)
+                });
             } else {
                 // Check which token exists in db (that's our liq token)
                 const token0Exists = await tokensCollection.findOne({ address: token0Address });
@@ -141,6 +152,19 @@ async function syncPairs() {
                     if (tokens.length === 2) {
                         liqToken = tokens[0].address; // First token is the liq token
                         newToken = tokens[1].address;
+                        
+                        // Create token-pair relationships
+                        relationsBatch.push({
+                            token_address: liqToken,
+                            pair_address: pairAddress,
+                            created_at: Math.floor(Date.now() / 1000)
+                        });
+                        
+                        relationsBatch.push({
+                            token_address: newToken,
+                            pair_address: pairAddress,
+                            created_at: Math.floor(Date.now() / 1000)
+                        });
                     } else {
                         // find each one separately
                         const token0index = await tokensCollection.findOne({ address: token0Address });
@@ -154,6 +178,8 @@ async function syncPairs() {
                         }
                     }
                 } else {
+                    // get token creation time from dexscreen api
+                    
                     // fetch via blockchain
                     // console.log(`Token0 : ${token0Address}\nToken1 : ${token1Address}`);
                     console.log(`Skipping pair ${pairAddress} - no tokens found`);
@@ -164,8 +190,7 @@ async function syncPairs() {
                 // Add the new token
                 const tokenInfo = await getTokenInfo(provider, newToken);
                 if (tokenInfo) {
-                    await tokensCollection.insertOne(tokenInfo);
-                    // console.log(`Added new token ${newToken}`);
+                    tokensBatch.push(tokenInfo);
                 }
 
                 // Add the pair with liq_token
@@ -179,16 +204,45 @@ async function syncPairs() {
                     created_at: Date.now()
                 };
 
-                await pairsCollection.insertOne(pair);
-                
-                // Update token pairs arrays
-                await tokensCollection.updateMany(
-                    { address: { $in: [token0Address, token1Address] } },
-                    { $addToSet: { pairs: pairAddress } }
-                );
+                pairsBatch.push(pair);
             }
             
             // console.log(`Processed pair ${pairAddress}`);
+            
+            // Insert batches when they reach the size limit
+            if (pairsBatch.length >= BATCH_SIZE) {
+                if (pairsBatch.length > 0) {
+                    await pairsCollection.insertMany(pairsBatch);
+                    console.log(`Inserted ${pairsBatch.length} pairs`);
+                    pairsBatch = [];
+                }
+                if (relationsBatch.length > 0) {
+                    await tokenPairRelationsCollection.insertMany(relationsBatch);
+                    console.log(`Inserted ${relationsBatch.length} relations`);
+                    relationsBatch = [];
+                }
+                if (tokensBatch.length > 0) {
+                    await tokensCollection.insertMany(tokensBatch);
+                    console.log(`Inserted ${tokensBatch.length} tokens`);
+                    tokensBatch = [];
+                }
+            }
+            
+            processedCount++;
+        }
+        
+        // Insert any remaining items in the batches
+        if (pairsBatch.length > 0) {
+            await pairsCollection.insertMany(pairsBatch);
+            console.log(`Inserted final ${pairsBatch.length} pairs`);
+        }
+        if (relationsBatch.length > 0) {
+            await tokenPairRelationsCollection.insertMany(relationsBatch);
+            console.log(`Inserted final ${relationsBatch.length} relations`);
+        }
+        if (tokensBatch.length > 0) {
+            await tokensCollection.insertMany(tokensBatch);
+            console.log(`Inserted final ${tokensBatch.length} tokens`);
         }
         
         // Create indexes
@@ -198,9 +252,11 @@ async function syncPairs() {
         await pairsCollection.createIndex({ 'liq_token': 1 });
         
         await tokensCollection.createIndex({ 'address': 1 }, { unique: true });
-        await tokensCollection.createIndex({ 'pairs': 1 });
         
-        console.log('Pair and token synchronization completed');
+        await tokenPairRelationsCollection.createIndex({ 'token_address': 1 });
+        await tokenPairRelationsCollection.createIndex({ 'pair_address': 1 });
+        
+        console.log(`Pair and token synchronization completed. Processed ${processedCount} pairs`);
     } catch (error) {
         console.error('Error syncing pairs:', error);
     } finally {
