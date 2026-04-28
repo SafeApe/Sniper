@@ -3,3 +3,5 @@ pub mod db;
 pub mod events;
 pub mod models;
 pub mod utils;
+#[path = "./client/client.rs"]
+pub mod client;

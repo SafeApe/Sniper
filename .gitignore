@@ -2,3 +2,8 @@
 */config.json
 ./config.json
 config.json
+.env
+
+# add node_modules
+/node_modules
+*/node_modules

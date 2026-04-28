@@ -41,7 +41,14 @@ rand = "0.8.4"
 hex = "0.4.3"
 secp256k1 = "0.30.0"
 k256 = "0.13.4"
-
+futures-util = "0.3.31"
+reqwest = "0.12.9"
+regex = "1.11.1"
+uuid = "1.11.0"
+pool-sync = "3.0.0"
+loom = { git = "https://github.com/dexloom/loom" , features = ["broadcast","broadcast-flashbots"]}
+alloy-mev = "0.5.0"
+chrono = "0.4.38"
 
 [dependencies.mongodb]
 version = "3.1.0"

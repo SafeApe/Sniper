@@ -1,20 +1,20 @@
-use crate::utils::{create_wallet, create_wallet_pk};
+use crate::utils::create_wallet;
 use bson::{doc, Document};
 use mongodb::bson::oid::ObjectId;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct tradeset {
-    pub trailingstoploss: f32, //If 0 turned off else the percentage to trail
-    pub trailingstoplosspercentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
-    pub trailingtakeprofit: f32,         //If 0 turned off else the percentage to trail
-    pub trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+#[derive(Serialize, Deserialize, Debug,Clone)]
+pub struct trailset {
+    pub trailing_stop_loss: f32, //If 0 turned off else the percentage to trail
+    pub trailing_stop_loss_percentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
+    pub trailing_take_profit: f32,         //If 0 turned off else the percentage to trail
+    pub trailing_take_profit_percentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct Trades {
     pub _id: Option<ObjectId>,
-    pub userid: u64,
+    pub userid: i64,
     pub address: String,
     pub isEVM: bool,
     pub chainID: i64,
@@ -23,45 +23,76 @@ pub struct Trades {
     pub priceBought: f64,
     pub stoploss: u64,   //If this is 0, stoploss is turned off
     pub takeprofit: u64, //If this is 0, takeprofit is turned off
-    pub trail: Option<tradeset>,
+    pub trail: Option<trailset>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct Wallet {
     pub _id: Option<ObjectId>,
     pub address: String,
     pub chainIDs: Vec<i64>, // If empty, enabled for all chains
     pub privateKey: String,
-    pub userid: u64,
+    pub userid: i64,
+    pub name: String, // Adding name field for wallet identification
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct User {
     pub _id: Option<ObjectId>,
-    pub userid: u64,
+    pub userid: i64,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug,Clone)]
 pub struct TradeSettings {
     // These are the settings for default trades
-    userid: u64,
-    multiwallet: bool,
-    stoploss: f32,
-    takeprofit: f32,
-    trailing: bool,        //If this is true, the following trailing settings are used
-    trailingstoploss: f32, //If 0 turned off else the percentage to trail
-    trailingstoplosspercentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
-    trailingtakeprofit: f32,         //If 0 turned off else the percentage to trail
-    trailingprofitpercentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+    pub userid: i64,
+    pub multiwallet: bool,
+    pub stoploss: f32,
+    pub takeprofit: f32,
+    pub trailing: bool,        //If this is true, the following trailing settings are used
+    pub trailing_stop_loss: f32, //If 0 turned off else the percentage to trail
+    pub trailing_stop_loss_percentage: f32, //We sell this percentage after hitting trailingstoploss percent of the price and decrease the price again to trail
+    pub trailing_take_profit: f32,         //If 0 turned off else the percentage to trail
+    pub trailing_take_profit_percentage: f32, //We sell this percentage after hitting trailingtakeprofit percent of the price and increase the price again to trail
+    pub mev_enabled_chains: Vec<i64>, // Chain IDs where MEV is enabled. Empty vector means MEV is disabled on all chains
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CopyTrade {
     //To copy trades from another user can be added as feature later
-    userid: u64,
+    userid: i64,
     active: bool,
     address: String,
     chains: Vec<i64>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Token {
+    pub _id: Option<ObjectId>,
+    pub name: String,
+    pub owner: Option<String>,   // Address as string
+    pub decimals: u8,
+    pub chain: i64,      // Chain ID
+    pub created_at: Option<i64>, // Unix timestamp
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TokenPairRelation {
+    pub _id: Option<ObjectId>,
+    pub token_address: String,
+    pub pair_address: String,
+    pub created_at: i64,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Pair {
+    pub _id: Option<ObjectId>,
+    pub token1: String,  // Address of first token
+    pub token2: String,  // Address of second token
+    pub pool_version: String, // Version of the pool (e.g., "v2", "v3")
+    pub dex: String,     // Name of the DEX (e.g., "Uniswap", "PancakeSwap")
+    pub liq_token: Option<String>, // Address of the liquidity token
+    pub created_at: Option<i64>, // Unix timestamp
 }
 
 impl From<Trades> for Document {
@@ -78,10 +109,10 @@ impl From<Trades> for Document {
             "takeprofit": trade.takeprofit.to_string(),
             "trail": match trade.trail {
                 Some(trail) => doc! {
-                    "trailingstoploss": trail.trailingstoploss as f64,
-                    "trailingstoplosspercentage": trail.trailingstoplosspercentage as f64,
-                    "trailingtakeprofit": trail.trailingtakeprofit as f64,
-                    "trailingprofitpercentage": trail.trailingprofitpercentage as f64,
+                    "trailing_stop_loss": trail.trailing_stop_loss as f64,
+                    "trailing_stop_loss_percentage": trail.trailing_stop_loss_percentage as f64,
+                    "trailing_take_profit": trail.trailing_take_profit as f64,
+                    "trailing_take_profit_percentage": trail.trailing_take_profit_percentage as f64,
                 },
                 None => doc! {},
             },
@@ -97,6 +128,7 @@ impl From<Wallet> for Document {
             "address": wallet.address,
             "chainIDs": wallet.chainIDs,
             "privateKey": wallet.privateKey,
+            "name": wallet.name,
         }
     }
 }
@@ -109,11 +141,12 @@ impl From<User> for Document {
         }
     }
 }
+
 impl From<Document> for Trades {
     fn from(doc: Document) -> Self {
         Trades {
             _id: Some(doc.get_object_id("_id").unwrap()),
-            userid: doc.get_i64("userid").unwrap() as u64,
+            userid: doc.get_i64("userid").unwrap(),
             address: doc.get_str("address").unwrap().to_string(),
             isEVM: doc.get_bool("isEVM").unwrap(),
             chainID: doc.get_i64("chainID").unwrap(),
@@ -123,13 +156,15 @@ impl From<Document> for Trades {
             stoploss: doc.get_i64("stoploss").unwrap() as u64,
             takeprofit: doc.get_i64("takeprofit").unwrap() as u64,
             trail: match doc.get_document("trail") {
-                Ok(trail) => Some(tradeset {
-                    trailingstoploss: trail.get_f64("trailingstoploss").unwrap() as f32,
-                    trailingstoplosspercentage: trail.get_f64("trailingstoplosspercentage").unwrap()
-                        as f32,
-                    trailingtakeprofit: trail.get_f64("trailingtakeprofit").unwrap() as f32,
-                    trailingprofitpercentage: trail.get_f64("trailingprofitpercentage").unwrap()
-                        as f32,
+                Ok(trail) => Some(trailset {
+                    trailing_stop_loss: trail.get_f64("trailing_stop_loss").unwrap() as f32,
+                    trailing_stop_loss_percentage: trail
+                        .get_f64("trailing_stop_loss_percentage")
+                        .unwrap() as f32,
+                    trailing_take_profit: trail.get_f64("trailing_take_profit").unwrap() as f32,
+                    trailing_take_profit_percentage: trail
+                        .get_f64("trailing_take_profit_percentage")
+                        .unwrap() as f32,
                 }),
                 Err(_) => None,
             },
@@ -141,7 +176,7 @@ impl From<Document> for Wallet {
     fn from(doc: Document) -> Self {
         Wallet {
             _id: Some(doc.get_object_id("_id").unwrap()),
-            userid: doc.get_i64("userid").unwrap() as u64,
+            userid: doc.get_i64("userid").unwrap(),
             address: doc.get_str("address").unwrap().to_string(),
             chainIDs: doc
                 .get_array("chainIDs")
@@ -150,6 +185,7 @@ impl From<Document> for Wallet {
                 .map(|x| x.as_i64().unwrap())
                 .collect(),
             privateKey: doc.get_str("privateKey").unwrap().to_string(),
+            name: doc.get_str("name").unwrap().to_string(),
         }
     }
 }
@@ -158,22 +194,141 @@ impl From<Document> for User {
     fn from(doc: Document) -> Self {
         User {
             _id: Some(doc.get_object_id("_id").unwrap()),
-            userid: doc.get_i64("userid").unwrap() as u64,
+            userid: doc.get_i64("userid").unwrap(),
+        }
+    }
+}
+
+impl From<TradeSettings> for Document {
+    fn from(settings: TradeSettings) -> Self {
+        doc! {
+            "userid": settings.userid.to_string(),
+            "multiwallet": settings.multiwallet,
+            "stoploss": settings.stoploss as f64,
+            "takeprofit": settings.takeprofit as f64,
+            "trailing": settings.trailing,
+            "trailing_stop_loss": settings.trailing_stop_loss as f64,
+            "trailing_stop_loss_percentage": settings.trailing_stop_loss_percentage as f64,
+            "trailing_take_profit": settings.trailing_take_profit as f64,
+            "trailing_take_profit_percentage": settings.trailing_take_profit_percentage as f64,
+            "mev_enabled_chains": settings.mev_enabled_chains,
+        }
+    }
+}
+
+impl From<Document> for TradeSettings {
+    fn from(doc: Document) -> Self {
+        TradeSettings {
+            userid: doc.get_i64("userid").unwrap(),
+            multiwallet: doc.get_bool("multiwallet").unwrap(),
+            stoploss: doc.get_f64("stoploss").unwrap() as f32,
+            takeprofit: doc.get_f64("takeprofit").unwrap() as f32,
+            trailing: doc.get_bool("trailing").unwrap(),
+            trailing_stop_loss: doc.get_f64("trailing_stop_loss").unwrap() as f32,
+            trailing_stop_loss_percentage: doc
+                .get_f64("trailing_stop_loss_percentage")
+                .unwrap() as f32,
+            trailing_take_profit: doc.get_f64("trailing_take_profit").unwrap() as f32,
+            trailing_take_profit_percentage: doc
+                .get_f64("trailing_take_profit_percentage")
+                .unwrap() as f32,
+            mev_enabled_chains: doc
+                .get_array("mev_enabled_chains")
+                .unwrap()
+                .into_iter()
+                .map(|x| x.as_i64().unwrap())
+                .collect(),
+        }
+    }
+}
+
+impl From<Token> for Document {
+    fn from(token: Token) -> Self {
+        doc! {
+            "_id": token._id,
+            "name": token.name,
+            "owner": token.owner,
+            "decimals": token.decimals as i32,
+            "chain": token.chain,
+            "created_at": token.created_at,
+        }
+    }
+}
+
+impl From<Document> for Token {
+    fn from(doc: Document) -> Self {
+        Token {
+            _id: doc.get_object_id("_id").ok(),
+            name: doc.get_str("name").unwrap().to_string(),
+            owner: Some(doc.get_str("owner").unwrap().to_string()),
+            decimals: doc.get_i32("decimals").unwrap() as u8,
+            chain: doc.get_i64("chain").unwrap(),
+            created_at: doc.get_i64("created_at").ok(),
+        }
+    }
+}
+
+impl From<TokenPairRelation> for Document {
+    fn from(relation: TokenPairRelation) -> Self {
+        doc! {
+            "_id": relation._id,
+            "token_address": relation.token_address,
+            "pair_address": relation.pair_address,
+            "created_at": relation.created_at,
+        }
+    }
+}
+
+impl From<Document> for TokenPairRelation {
+    fn from(doc: Document) -> Self {
+        TokenPairRelation {
+            _id: doc.get_object_id("_id").ok(),
+            token_address: doc.get_str("token_address").unwrap().to_string(),
+            pair_address: doc.get_str("pair_address").unwrap().to_string(),
+            created_at: doc.get_i64("created_at").unwrap(),
+        }
+    }
+}
+
+impl From<Pair> for Document {
+    fn from(pair: Pair) -> Self {
+        doc! {
+            "_id": pair._id,
+            "token1": pair.token1,
+            "token2": pair.token2,
+            "pool_version": pair.pool_version,
+            "dex": pair.dex,
+            "created_at": pair.created_at,
+        }
+    }
+}
+
+impl From<Document> for Pair {
+    fn from(doc: Document) -> Self {
+        Pair {
+            _id: doc.get_object_id("_id").ok(),
+            token1: doc.get_str("token1").unwrap().to_string(),
+            token2: doc.get_str("token2").unwrap().to_string(),
+            pool_version: doc.get_str("pool_version").unwrap().to_string(),
+            dex: doc.get_str("dex").unwrap().to_string(),
+            liq_token: match doc.get_str("liq_token") { Ok(x) => Some(x.to_string()), Err(_) => None },
+            created_at: doc.get_i64("created_at").ok(),
         }
     }
 }
 
 impl User {
-    pub fn default(userid: u64) -> User {
+    pub fn default(userid: i64) -> User {
         User { _id: None, userid }
     }
-    pub fn new(userid: u64) -> User {
+
+    pub fn new(userid: i64) -> User {
         User { _id: None, userid }
     }
 }
 
 impl Wallet {
-    pub fn new(userid: u64) -> Wallet {
+    pub fn new(userid: i64) -> Wallet {
         let (privateKey, address) = create_wallet();
         Wallet {
             _id: None,
@@ -181,22 +336,25 @@ impl Wallet {
             address: address.to_string(),
             chainIDs: vec![],
             privateKey,
+            name: format!("Wallet {}", &address.to_string()[0..8]), // Default name using first 8 chars of address
         }
     }
-    pub fn default(userid: u64, address: String, chainIDs: Vec<i64>, privateKey: String) -> Wallet {
+
+    pub fn default(userid: i64, address: String, chainIDs: Vec<i64>, privateKey: String) -> Wallet {
         Wallet {
             _id: None,
             userid,
-            address,
+            address: address.clone(),
             chainIDs,
             privateKey,
+            name: format!("Wallet {}", &address[0..8]), // Default name using first 8 chars of address
         }
     }
 }
 
 impl Trades {
     pub fn new(
-        userid: u64,
+        userid: i64,
         address: String,
         isEVM: bool,
         chainID: i64,
@@ -205,7 +363,7 @@ impl Trades {
         priceBought: f64,
         stoploss: u64,
         takeprofit: u64,
-        trail: Option<tradeset>,
+        trail: Option<trailset>,
     ) -> Trades {
         Trades {
             _id: None,
@@ -219,6 +377,23 @@ impl Trades {
             stoploss,
             takeprofit,
             trail,
+        }
+    }
+}
+
+impl TradeSettings {
+    pub fn new(userid: i64) -> TradeSettings {
+        TradeSettings {
+            userid,
+            multiwallet: false,
+            stoploss: 0.0,
+            takeprofit: 0.0,
+            trailing: false,
+            trailing_stop_loss: 0.0,
+            trailing_stop_loss_percentage: 0.0,
+            trailing_take_profit: 0.0,
+            trailing_take_profit_percentage: 0.0,
+            mev_enabled_chains: Vec::new(), // Default to MEV disabled on all chains
         }
     }
 }

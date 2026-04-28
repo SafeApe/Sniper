@@ -5,10 +5,14 @@ use config::Config;
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Network {
     pub name: String,
-    pub rpc: String,
+    pub ws_rpc: String,
+    pub http_rpc: String,
     pub chain_id: u64,
     pub eip1599: bool,
     pub sniperca: String,
+    pub explorer: String,
+    pub flashbots_url: String,
+    pub aggregate_flashbots: bool, //This will be true if the network supports multiple relays
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -50,7 +54,7 @@ impl SConfig {
 
 pub fn getConfig() -> SConfig {
     Config::builder()
-        .add_source(config::File::with_name("../config"))
+        .add_source(config::File::with_name("config"))
         .build()
         .unwrap()
         .try_deserialize::<SConfig>()
